@@ -1,0 +1,12 @@
+{
+  "name": "frontend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node check-backend.js",
+    "lint": "eslint static/script.js"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.1"
+  }
+}

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clean Downloader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <!-- Decorative Background Blobs -->
+    <div class="bg-shape shape-1"></div>
+    <div class="bg-shape shape-2"></div>
+
+    <div id="preloader">
+        <div class="spinner"></div>
+    </div>
+
+    <div class="main-container" style="display: none;">
+        <div class="glass-card">
+            <header class="app-header">
+                <div class="logo">⚡ CleanDl</div>
+                <h1>Creator Tools</h1>
+                <p>Analyze & Download videos efficiently.</p>
+            </header>
+            
+            <main>
+                <div class="input-group">
+                    <input type="text" id="url-input" placeholder="Paste video URL here..." autocomplete="off">
+                    <button id="download-btn">
+                        <span>Analyze</span>
+                    </button>
+                </div>
+                
+                <div id="loader" class="loader-dots" style="display: none;">
+                    <span></span><span></span><span></span>
+                </div>
+
+                <div id="error-message" class="message-box error" style="display: none;"></div>
+
+                <div id="results-section" class="results-card" style="display: none;">
+                    <div class="video-meta">
+                        <div class="thumb-wrapper">
+                            <img id="thumbnail" src="" alt="Video Thumbnail" loading="lazy">
+                        </div>
+                        <div class="meta-info">
+                            <h3 id="video-title">Video Title</h3>
+                            <p id="video-author" class="author-name">@Author</p>
+                        </div>
+                    </div>
+
+                    <!-- ANALYTICS DASHBOARD -->
+                    <div class="analytics-dashboard">
+                        <div class="stats-grid revenue-grid">
+                            <!-- REVENUE CARD -->
+                            <div class="stat-card revenue-card">
+                                <span class="stat-label">Est. Revenue</span>
+                                <span class="stat-value money-val" id="stat-revenue">$0.00</span>
+                                <span class="stat-sub" id="stat-cpm">CPM: $0.00</span>
+                            </div>
+                            
+                            <div class="stat-card">
+                                <span class="stat-label">Views</span>
+                                <span class="stat-value" id="stat-views">-</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Likes</span>
+                                <span class="stat-value" id="stat-likes">-</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Comments</span>
+                                <span class="stat-value" id="stat-comments">-</span>
+                            </div>
+                        </div>
+                        
+                        <div class="chart-container" style="margin-top: 20px;">
+                            <canvas id="analyticsChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- AUDIENCE INSIGHTS -->
+                    <div class="analytics-dashboard" style="margin-top: 15px;">
+                        <h4 style="margin-bottom: 15px;">🚀 Audience Insights <span class="badge" style="font-size: 0.6rem; vertical-align: middle;">AI Estimate</span></h4>
+                        <div class="charts-row">
+                            <div class="chart-box">
+                                <h5>Age Distribution</h5>
+                                <div class="canvas-wrapper">
+                                    <canvas id="ageChart"></canvas>
+                                </div>
+                            </div>
+                            <div class="chart-box">
+                                <h5>Gender Split</h5>
+                                <div class="canvas-wrapper">
+                                    <canvas id="genderChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="divider"></div>
+                    
+                    <h4>Downloads</h4>
+                    <div id="format-links" class="format-grid">
+                        <!-- Grid Items will be injected here -->
+                    </div>
+                </div>
+            </main>
+
+            <footer class="app-footer">
+                <p>Powered by <strong>Axoloth</strong> &copy; 2025</p>
+            </footer>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}" defer></script>
+</body>
+</html>

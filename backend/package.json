@@ -1,0 +1,13 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "app.py",
+  "scripts": {
+    "dev": "nodemon --exec python app.py",
+    "worker": "celery -A celery_worker.celery_app worker --loglevel=info --pool=threads --concurrency=2",
+    "lint": "flake8 app.py"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  }
+}

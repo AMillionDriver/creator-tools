@@ -1,0 +1,10 @@
+node_modules/
+__pycache__/
+*.pyc
+.env
+venv/
+.DS_Store
+backend/downloads/
+backend/flask_app.log
+backend/server.log
+backend/server.err.log
