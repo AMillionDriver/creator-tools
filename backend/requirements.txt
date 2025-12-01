@@ -6,3 +6,4 @@ python-dotenv
 Flask-Limiter
 requests
 Flask-WTF
+gunicorn

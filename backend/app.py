@@ -7,12 +7,12 @@ import threading
 import time
 import uuid
 import requests
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 from utils import is_safe_url
 from auth import require_api_key, API_KEY
 from quota import QuotaManager
@@ -37,174 +37,29 @@ app = Flask(
     static_url_path='/static'
 )
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default-dev-key')
-CORS(app)
+
+# Allow CORS with credentials (needed for CSRF cookie)
+CORS(app, supports_credentials=True, resources={r"/api/*": {"origins": "*"}}) 
+
 csrf = CSRFProtect(app)
 
-# Setup Rate Limiter
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["200 per day", "50 per hour"],
-    storage_uri=os.environ.get('REDIS_BROKER_URL', 'redis://localhost:6379/0') # Use Redis for persistent storage
-)
+# ... rate limiter ...
 
-# --- Konfigurasi ---
-DOWNLOADS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads')
-if not os.path.exists(DOWNLOADS_DIR):
-    os.makedirs(DOWNLOADS_DIR)
-
-SAFE_EXTENSIONS = {'.mp4', '.mkv', '.webm', '.mp3', '.m4a', '.wav', '.flac', '.jpg', '.jpeg', '.png', '.webp'}
-MAX_FILESIZE = 5 * 1024 * 1024 * 1024 # 5GB
-TIMEOUT_SECONDS = 3600 # 1 Hour
-
-quota_manager = QuotaManager()
-
-ARIA2C_PATH = os.environ.get('ARIA2C_PATH')
-# Fix path separator if needed
-if ARIA2C_PATH:
-    ARIA2C_PATH = ARIA2C_PATH.replace('\\', '/')
-
-# Semaphore to limit concurrent downloads
-MAX_CONCURRENT_DOWNLOADS = 3 # Example limit
-download_semaphore = threading.BoundedSemaphore(value=MAX_CONCURRENT_DOWNLOADS)
-
-
-# --- In-Memory Status Storage ---
-# Menyimpan status download yang sedang berjalan
-# Format: { 'task_id': { 'status': '...', 'percentage': 0, 'filename': '...' } }
-download_tasks = {}
-
-def run_download_thread(task_id, url, format_id, user_identifier, custom_filename=None):
-    """Fungsi ini berjalan di thread terpisah"""
-    print(f"[{task_id}] Thread started for URL: {url}")
-    
-    download_tasks[task_id] = {
-        'status': 'Starting...', 
-        'percentage': 0,
-        'message': 'Initializing download...'
-    }
-
-    # Acquire semaphore
-    # The actual acquire happens in the calling function, this thread will just execute.
-
-    # Sanitize filename
-    if custom_filename:
-        sanitized_filename = re.sub(r'[\\/:*?"<>|]', '', custom_filename)
-        output_template = os.path.join(DOWNLOADS_DIR, f"{sanitized_filename}.%(ext)s")
-    else:
-        output_template = os.path.join(DOWNLOADS_DIR, f"{task_id}.%(ext)s")
-
-    command = [
-        "yt-dlp",
-        "-f", format_id,
-        "--max-filesize", "5G", # Enforce max size at downloader level
-        "-o", output_template,
-        # Kita matikan aria2c sementara agar progress bar yt-dlp lebih mudah diparsing
-        # Jika ingin pakai aria2c, parsing logikanya harus disesuaikan lagi
-        url
-    ]
-    
-    # DEBUG PRINT COMMAND
-    print(f"[{task_id}] EXECUTING CMD: {' '.join(command)}")
-
-    start_time = time.time()
-    process = None
-
-    try:
-        # Jalankan proses dan baca output real-time
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, # Gabung stderr ke stdout agar bisa dibaca
-            text=True,
-            encoding='utf-8',
-            errors='ignore',
-            bufsize=1, # Line buffered
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-        )
-
-        last_lines = [] # Simpan output terakhir untuk debug error
-
-        while True:
-            # Check for timeout
-            if time.time() - start_time > TIMEOUT_SECONDS:
-                process.kill()
-                raise TimeoutError("Download timed out (exceeded 1 hour)")
-
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
-                break
-            
-            if not line:
-                time.sleep(0.1) # prevent tight loop if no output temporarily
-                continue
-            
-            line = line.strip()
-            # Print ke terminal backend agar admin bisa baca lognya
-            print(f"[{task_id}] yt-dlp: {line}")
-            
-            # Simpan 5 baris terakhir
-            last_lines.append(line)
-            if len(last_lines) > 5:
-                last_lines.pop(0)
-            
-            # Parsing Progress yt-dlp
-            # Contoh: [download]  45.0% of 10.00MiB at 2.50MiB/s ETA 00:05
-            match = re.search(r'\[download\]\s+(\d+\.\d+)%', line)
-            if match:
-                percent = float(match.group(1))
-                download_tasks[task_id]['status'] = 'Downloading'
-                download_tasks[task_id]['percentage'] = percent
-                download_tasks[task_id]['message'] = f"{percent}% completed"
-            
-        if process.returncode == 0:
-            # Cari file hasil download
-            search_prefix = task_id
-            if custom_filename:
-                 search_prefix = re.sub(r'[\\/:*?"<>|]', '', custom_filename)
-
-            # Refresh file list
-            files = [f for f in os.listdir(DOWNLOADS_DIR) if f.startswith(search_prefix)]
-            if files:
-                final_filename = files[0]
-                file_path = os.path.join(DOWNLOADS_DIR, final_filename)
-                file_size = os.path.getsize(file_path)
-
-                # Update Quota
-                quota_manager.add_usage(user_identifier, file_size)
-
-                download_tasks[task_id]['status'] = 'Completed'
-                download_tasks[task_id]['percentage'] = 100
-                download_tasks[task_id]['filename'] = final_filename
-                download_tasks[task_id]['message'] = 'Download Finished!'
-            else:
-                download_tasks[task_id]['status'] = 'Failed'
-                download_tasks[task_id]['message'] = 'File not found after download.'
-        else:
-            # Ambil pesan error dari output terakhir
-            error_details = " | ".join(last_lines)
-            # Check for specific max filesize error from yt-dlp
-            if "File is larger than" in error_details or "Abort" in error_details: 
-                 error_details = "File exceeded maximum allowed size (5GB)."
-
-            download_tasks[task_id]['status'] = 'Failed'
-            download_tasks[task_id]['message'] = f"Error: {error_details}"
-
-    except Exception as e:
-        print(f"[{task_id}] Error: {e}")
-        if process and process.poll() is None:
-            process.kill()
-        download_tasks[task_id]['status'] = 'Failed'
-        download_tasks[task_id]['message'] = str(e)
-    finally:
-        # Always release the semaphore
-        download_semaphore.release()
-        print(f"[{task_id}] Semaphore released.")
-
+@app.route('/api/handshake', methods=['GET'])
+@limiter.limit("10 per minute")
+def handshake():
+    """
+    Endpoint for frontend to get CSRF token and Config
+    """
+    token = generate_csrf()
+    return jsonify({
+        "csrf_token": token,
+        "recaptcha_site_key": RECAPTCHA_SITE_KEY
+    })
 
 @app.route('/')
 def index():
-    return render_template('index.html', recaptcha_site_key=RECAPTCHA_SITE_KEY)
+    return jsonify({"status": "online", "message": "Backend is running"})
 
 @app.route('/favicon.ico')
 def favicon():

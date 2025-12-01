@@ -2,12 +2,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const preloader = document.getElementById('preloader');
     const mainContainer = document.querySelector('.main-container');
 
-    // Simulate loading
-    setTimeout(() => {
-        if (preloader) preloader.style.display = 'none';
-        if (mainContainer) mainContainer.style.display = 'block';
-    }, 1500);
-
     const urlInput = document.getElementById('url-input');
     const getInfoBtn = document.getElementById('download-btn');
     const loader = document.getElementById('loader');
@@ -34,8 +28,44 @@ document.addEventListener('DOMContentLoaded', () => {
     let ageChartInstance = null;
     let genderChartInstance = null;
 
-    const API_BASE = '/api';
-    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    const API_BASE = '/api'; // In Vercel, this will be proxied to Backend
+    let csrfToken = null;
+    let recaptchaWidgetId = null;
+
+    // Initialize
+    initApp();
+
+    async function initApp() {
+        try {
+            // Fetch Config (CSRF + Site Key)
+            const res = await fetch(`${API_BASE}/handshake`);
+            if (!res.ok) throw new Error('Failed to connect to backend');
+            
+            const config = await res.json();
+            csrfToken = config.csrf_token;
+            
+            // Initialize ReCAPTCHA
+            if (config.recaptcha_site_key && window.grecaptcha) {
+                 grecaptcha.ready(function() {
+                    try {
+                        recaptchaWidgetId = grecaptcha.render('recaptcha-container', {
+                            'sitekey': config.recaptcha_site_key
+                        });
+                    } catch(e) { console.log("Captcha render error (maybe already rendered):", e); }
+                });
+            }
+
+            // Hide Preloader
+            if (preloader) preloader.style.display = 'none';
+            if (mainContainer) mainContainer.style.display = 'block';
+
+        } catch (err) {
+            console.error("Init Error:", err);
+            showError("Could not connect to server. Please try again later.");
+             // Still hide preloader so user sees error
+            if (preloader) preloader.style.display = 'none';
+        }
+    }
 
     getInfoBtn.textContent = 'Get Video Info';
     getInfoBtn.addEventListener('click', handleGetInfo);
@@ -44,6 +74,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleGetInfo() {
         const url = urlInput.value.trim();
         if (!url) return showError('Please paste a URL first.');
+        
+        // Refetch CSRF if missing (expired?) - simplistic approach
+        if (!csrfToken) await initApp();
 
         resetUI();
         loader.style.display = 'block';
