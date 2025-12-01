@@ -35,7 +35,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let genderChartInstance = null;
 
     const API_BASE = '/api';
-    const apiKey = document.querySelector('meta[name="api-key"]').content;
 
     getInfoBtn.textContent = 'Get Video Info';
     getInfoBtn.addEventListener('click', handleGetInfo);
@@ -52,8 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(`${API_BASE}/download`, {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json',
-                    'X-API-Key': apiKey
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ url })
             });
@@ -363,8 +361,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(`${API_BASE}/process-video`, {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json',
-                    'X-API-Key': apiKey
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ url, format_id: formatId })
             });

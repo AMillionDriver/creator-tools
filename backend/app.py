@@ -37,7 +37,7 @@ limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://" # Use Redis in production if available
+    storage_uri=os.environ.get('REDIS_BROKER_URL', 'redis://localhost:6379/0') # Use Redis for persistent storage
 )
 
 # --- Konfigurasi ---
@@ -56,6 +56,11 @@ ARIA2C_PATH = os.environ.get('ARIA2C_PATH')
 if ARIA2C_PATH:
     ARIA2C_PATH = ARIA2C_PATH.replace('\\', '/')
 
+# Semaphore to limit concurrent downloads
+MAX_CONCURRENT_DOWNLOADS = 3 # Example limit
+download_semaphore = threading.BoundedSemaphore(value=MAX_CONCURRENT_DOWNLOADS)
+
+
 # --- In-Memory Status Storage ---
 # Menyimpan status download yang sedang berjalan
 # Format: { 'task_id': { 'status': '...', 'percentage': 0, 'filename': '...' } }
@@ -70,6 +75,9 @@ def run_download_thread(task_id, url, format_id, user_identifier, custom_filenam
         'percentage': 0,
         'message': 'Initializing download...'
     }
+
+    # Acquire semaphore
+    # The actual acquire happens in the calling function, this thread will just execute.
 
     # Sanitize filename
     if custom_filename:
@@ -180,11 +188,15 @@ def run_download_thread(task_id, url, format_id, user_identifier, custom_filenam
             process.kill()
         download_tasks[task_id]['status'] = 'Failed'
         download_tasks[task_id]['message'] = str(e)
+    finally:
+        # Always release the semaphore
+        download_semaphore.release()
+        print(f"[{task_id}] Semaphore released.")
 
 
 @app.route('/')
 def index():
-    return render_template('index.html', api_key=API_KEY)
+    return render_template('index.html')
 
 @app.route('/favicon.ico')
 def favicon():
@@ -192,7 +204,6 @@ def favicon():
 
 @app.route('/api/download', methods=['POST'])
 @limiter.limit("5 per minute")
-@require_api_key
 def download_info():
     """Mengambil info video (Thumbnail, Judul, Format)"""
     data = request.get_json()
@@ -254,7 +265,6 @@ def download_info():
 
 @app.route('/api/process-video', methods=['POST'])
 @limiter.limit("3 per minute")
-@require_api_key
 def process_video():
     """Memulai proses download di background thread"""
     data = request.get_json()
@@ -262,8 +272,8 @@ def process_video():
     format_id = data.get('format_id')
     filename = data.get('filename')
 
-    # Identify User for Quota (Use API Key if available, else IP)
-    user_identifier = request.headers.get('X-API-Key') or request.remote_addr
+    # Identify User for Quota (Now primarily by IP, as API key is not sent from frontend)
+    user_identifier = request.remote_addr
 
     # Check Quota
     if not quota_manager.check_quota(user_identifier):
@@ -281,6 +291,9 @@ def process_video():
 
     task_id = str(uuid.uuid4())
     
+    if not download_semaphore.acquire(blocking=False):
+        return jsonify({"error": f"Too many concurrent downloads. Please wait for an active download to finish (max {MAX_CONCURRENT_DOWNLOADS})."}), 429
+
     # Jalankan thread
     thread = threading.Thread(target=run_download_thread, args=(task_id, url, format_id, user_identifier, filename))
     thread.daemon = True # Agar thread mati jika server mati

@@ -4,3 +4,4 @@ celery
 redis
 python-dotenv
 Flask-Limiter
+redis
