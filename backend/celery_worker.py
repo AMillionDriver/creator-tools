@@ -5,6 +5,7 @@ import logging
 from celery import Celery
 from celery.signals import task_postrun
 from dotenv import load_dotenv
+from utils import is_safe_url
 
 load_dotenv() # Load environment variables from .env file
 
@@ -57,6 +58,12 @@ def downloaded_files_for_task(task_id_prefix):
 def download_video_task(self, url, format_id, task_id, custom_filename=None):
     celery_logger.info(f"[{task_id}] Celery task started for URL: {url}, Custom Filename: {custom_filename}")
     
+    if not is_safe_url(url):
+        error_msg = "Security Error: Invalid or restricted URL domain."
+        celery_logger.error(f"[{task_id}] {error_msg}")
+        self.update_state(state='FAILURE', meta={'message': error_msg})
+        return {'status': 'Failed', 'message': error_msg}
+
     # Sanitize custom_filename to prevent path traversal or other issues
     if custom_filename:
         # Remove any path separators and invalid characters
@@ -73,6 +80,7 @@ def download_video_task(self, url, format_id, task_id, custom_filename=None):
             "-f", format_id,
             "--external-downloader", ARIA2C_PATH,
             "--external-downloader-args", "-x 16 -s 16 -k 1M",
+            "--max-filesize", "5G", # Enforce 5GB limit
             "-o", output_template,
             url
         ]
@@ -80,7 +88,7 @@ def download_video_task(self, url, format_id, task_id, custom_filename=None):
         celery_logger.info(f"[{task_id}] Executing command: {' '.join(command)}")
 
         # Use subprocess.run for better stability on Windows
-        process = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        process = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='ignore', timeout=3600)
 
         if process.returncode != 0:
             stderr_output = process.stderr

@@ -8,3 +8,6 @@ backend/downloads/
 backend/flask_app.log
 backend/server.log
 backend/server.err.log
+flask_app.log
+*.log
+backend/quota_tracker.json
