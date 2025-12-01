@@ -30,12 +30,7 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s'
 )
 
-app = Flask(
-    __name__,
-    template_folder='../frontend/templates',
-    static_folder='../frontend/static',
-    static_url_path='/static'
-)
+app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default-dev-key')
 
 # Allow CORS with credentials (needed for CSRF cookie)
