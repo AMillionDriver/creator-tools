@@ -1,42 +1,35 @@
 # Penetration Test Report
 
 ## Overview
-Security assessment of the Creator Tools project with focus on network-exposed Flask backend (`backend/app.py`) and bundled frontend (`frontend/templates`, `frontend/static`). Review covered authentication, access control, sensitive data handling, and abuse resistance.
+Security review of the Creator Tools application (Flask backend with Redis rate/quota controls and static frontend). Assessment emphasized authentication/authorization, exposure of downloader functionality, and resource-abuse risks.
 
 ## Methodology
-- Static analysis of Python backend and frontend JavaScript/HTML templates.
-- Threat modeling for authentication, resource usage, and data exposure paths.
-- Manual review of subprocess usage and file-serving logic.
+- Static code review of backend Flask routes, authentication helper, and quota enforcement.
+- Review of frontend behavior to understand request patterns and exposure surface.
+- Threat modeling for unauthorized access, cross-origin abuse, and resource exhaustion.
 
 ## Findings
 
-### 1) Authentication becomes optional when `API_KEY` is missing (High)
-The `require_api_key` decorator only blocks requests if the `API_KEY` environment variable is set; otherwise it transparently allows every request. In default setups without a configured key, all protected endpoints (`/api/download`, `/api/process-video`) become publicly accessible despite appearing to require authentication. This enables unauthorized use of the downloader and bypasses quota enforcement that is keyed to the presented API key or client IP.
+### 1) Downloader API lacks authentication/authorization (High)
+All backend routes are reachable without authentication; the `require_api_key` decorator is imported but never applied. The download endpoints (`/api/download`, `/api/process-video`, status, and file serving) therefore accept requests from any internet client, and quota tracking keys off the client IP rather than a verified identity. An attacker can freely invoke downloads, enumerate task IDs, or fetch completed files belonging to other users.
 
-**Evidence:**
-- Decorator returns the wrapped handler without any check when `API_KEY` is falsy.【F:backend/auth.py†L8-L22】
-- API endpoints rely on that decorator for protection and still derive `user_identifier` from the API key header when present, assuming authentication happened.【F:backend/app.py†L193-L289】
+**Evidence:** Endpoints are defined without protection and identify users only by `request.remote_addr` when starting a download.【F:backend/app.py†L205-L332】 The API-key decorator exists but is unused in the route definitions.【F:backend/auth.py†L5-L23】【F:backend/app.py†L15-L16】
 
-**Recommendation:** Fail fast when `API_KEY` is absent (e.g., refuse to start or reject all requests), and enforce authentication consistently for every state-changing or data-returning endpoint.
+**Recommendation:** Require authentication on every state-changing and file-serving route (e.g., session or token with per-user quota). Apply the decorator (or equivalent) to all sensitive endpoints and reject requests that lack valid credentials.
 
-### 2) API key is embedded in the rendered HTML and reused by client JavaScript (High)
-The server injects the API key into a `<meta>` tag and frontend code reads it to set the `X-API-Key` header on every request. Any visitor or intermediary can view and reuse the key, defeating its purpose as a shared secret and enabling cross-origin abuse since CORS is fully enabled. Attackers can harvest the key and drive the backend to perform downloads under the victim’s quota or infrastructure.
+### 2) Permissive CORS enables drive-by abuse (High)
+CORS is enabled globally for all origins, and requests are simple JSON posts without CSRF defenses. Combined with the unauthenticated API, any external website can trigger downloads on behalf of a visitor’s browser, consuming server bandwidth and quota with a single embedded script.
 
-**Evidence:**
-- Template exposes the API key to the browser via a meta tag.【F:frontend/templates/index.html†L3-L36】
-- Frontend script reads that meta tag and attaches the key to backend requests.【F:frontend/static/script.js†L33-L69】
-- Backend enables CORS for all origins, making stolen keys usable from any site.【F:backend/app.py†L27-L41】
+**Evidence:** The Flask app enables CORS with no origin restrictions at startup.【F:backend/app.py†L27-L41】 The exposed endpoints accept POST requests without CSRF tokens or origin checks.【F:backend/app.py†L205-L332】
 
-**Recommendation:** Treat the API key as a server-side secret—do not embed it in client assets. Require user-specific authentication (sessions or OAuth), keep secrets server-only, and restrict CORS to trusted origins.
+**Recommendation:** Restrict CORS to trusted origins, add CSRF protection, and require authentication headers/tokens so cross-origin requests cannot silently invoke downloader actions.
 
-### 3) Download service can be abused for resource exhaustion (Medium)
-The backend permits downloads up to 5 GB per request with one-hour subprocess timeouts, uses in-memory rate limits, and identifies users by API key or IP. When authentication is absent or the shared key leaks, attackers can spawn many long-running `yt-dlp` processes, consuming bandwidth, disk, and CPU. The in-memory limiter and quota file offer limited protection (reset on restart, shared across users behind NAT) and CORS exposure allows drive-by abuse from other origins.
+### 3) Downloader throughput enables resource exhaustion (Medium)
+Each request can fetch files up to 5 GB with a one-hour subprocess timeout, and the server starts downloads immediately after minimal validation. Only three concurrent downloads are blocked via a semaphore; there are no aggregate disk/CPU caps or cleanup of completed files. Attackers can queue repeated large downloads to exhaust disk, bandwidth, and worker slots despite daily per-IP quota limits.
 
-**Evidence:**
-- Large file limit and extended timeout for each download task.【F:backend/app.py†L43-L117】
-- Requests are rate-limited and quota-tracked only after the weak authentication layer noted above.【F:backend/app.py†L193-L289】
+**Evidence:** Maximum file size and timeout are set to 5 GB and one hour, and downloads start via background threads guarded only by a 3-slot semaphore.【F:backend/app.py†L49-L195】 Quota is enforced per IP with a 15 GB daily limit, allowing repeated large requests from varied networks to bypass meaningful throttling.【F:backend/app.py†L266-L302】【F:backend/quota.py†L6-L69】
 
-**Recommendation:** Enforce strong authentication first, lower the maximum file size/timeout, add server-side caps on concurrent tasks and total disk usage, and persist rate limiting/quota tracking in a hardened store (e.g., Redis) with per-account enforcement.
+**Recommendation:** Reduce size/time limits, add global and per-account caps on concurrent tasks and storage, implement automatic cleanup of old artifacts, and tighten quota enforcement (e.g., per authenticated user with behavioral anomaly detection).
 
 ## Conclusion
-The most critical issues are the optional authentication path and the exposed API key, which together nullify access control and enable remote abuse. Addressing these gaps and tightening resource limits will substantially harden the downloader against misuse and compromise.
+The downloader remains exposed to the public internet with no authentication and permissive cross-origin access, making abuse straightforward. Locking down access control, restricting origins, and hardening resource limits are necessary to prevent unauthorized use and operational disruption.
