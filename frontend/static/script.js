@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let genderChartInstance = null;
 
     const API_BASE = '/api';
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
     getInfoBtn.textContent = 'Get Video Info';
     getInfoBtn.addEventListener('click', handleGetInfo);
@@ -51,7 +52,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(`${API_BASE}/download`, {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
                 },
                 body: JSON.stringify({ url })
             });
@@ -352,6 +354,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function startBackendDownload(url, formatId, btn, statusText, progressBar, progressContainer) {
+        // Check Captcha
+        let captchaToken = null;
+        if (typeof grecaptcha !== 'undefined') {
+            captchaToken = grecaptcha.getResponse();
+            if (!captchaToken) {
+                alert("Please check the 'I'm not a robot' box.");
+                return;
+            }
+        }
+
         btn.disabled = true;
         statusText.textContent = 'Starting...';
         progressContainer.style.display = 'block'; // Show progress bar
@@ -361,9 +373,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(`${API_BASE}/process-video`, {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
                 },
-                body: JSON.stringify({ url, format_id: formatId })
+                body: JSON.stringify({ 
+                    url, 
+                    format_id: formatId,
+                    'g-recaptcha-response': captchaToken 
+                })
             });
             const data = await res.json();
 

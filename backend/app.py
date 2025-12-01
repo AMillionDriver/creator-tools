@@ -6,16 +6,22 @@ import subprocess
 import threading
 import time
 import uuid
+import requests
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFProtect
 from utils import is_safe_url
 from auth import require_api_key, API_KEY
 from quota import QuotaManager
 
 load_dotenv()
+
+# Recaptcha Config
+RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY')
+RECAPTCHA_SITE_KEY = os.environ.get('RECAPTCHA_SITE_KEY')
 
 # Konfigurasi logging
 logging.basicConfig(
@@ -30,7 +36,9 @@ app = Flask(
     static_folder='../frontend/static',
     static_url_path='/static'
 )
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default-dev-key')
 CORS(app)
+csrf = CSRFProtect(app)
 
 # Setup Rate Limiter
 limiter = Limiter(
@@ -196,7 +204,7 @@ def run_download_thread(task_id, url, format_id, user_identifier, custom_filenam
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', recaptcha_site_key=RECAPTCHA_SITE_KEY)
 
 @app.route('/favicon.ico')
 def favicon():
@@ -285,6 +293,27 @@ def process_video():
 
     if not url or not format_id:
         return jsonify({"error": "Missing data"}), 400
+
+    # Verify reCAPTCHA
+    captcha_response = data.get('g-recaptcha-response')
+    if RECAPTCHA_SECRET_KEY: # Only verify if key is configured
+        if not captcha_response:
+             return jsonify({"error": "Please complete the captcha."}), 400
+        
+        verify_payload = {
+            'secret': RECAPTCHA_SECRET_KEY,
+            'response': captcha_response,
+            'remoteip': request.remote_addr
+        }
+        try:
+            verify_req = requests.post('https://www.google.com/recaptcha/api/siteverify', data=verify_payload, timeout=10)
+            verify_resp = verify_req.json()
+            if not verify_resp.get('success'):
+                return jsonify({"error": "Captcha verification failed. Please try again."}), 400
+        except Exception as e:
+             print(f"Captcha Error: {e}")
+             # Fail open or closed? Safe to fail closed.
+             return jsonify({"error": "Captcha verification error."}), 500
 
     if not is_safe_url(url):
         return jsonify({"error": "Invalid or restricted URL domain"}), 400
